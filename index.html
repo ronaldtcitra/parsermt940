@@ -664,13 +664,11 @@
 
   // Mode asli: buat & isi spreadsheet lewat Google Sheets API.
   async function createRealSpreadsheet(){
-    // Buka tab kosong SEKARANG (dalam gesture klik) supaya tidak diblokir popup blocker,
-    // lalu arahkan tab ini ke URL spreadsheet setelah selesai dibuat.
-    const newTab = window.open('about:blank', '_blank');
-    writeLoadingPage(newTab);
-
     try{
-      showToast('Menghubungkan ke akun Google…');
+      // PENTING: requestAccessToken() harus jadi popup PERTAMA yang dipicu langsung
+      // dari klik pengguna. Kalau ada window.open() lain sebelum ini, popup Google
+      // akan diblokir browser ("Failed to open popup window").
+      showToast('Menghubungkan ke akun Google… izinkan popup jika muncul permintaan.');
       const token = await requestAccessToken();
 
       showToast('Membuat spreadsheet baru…');
@@ -680,32 +678,17 @@
       await fillSpreadsheet(token, spreadsheetId, parsed);
       await formatSpreadsheet(token, spreadsheetId);
 
-      if (newTab && !newTab.closed) newTab.location = spreadsheetUrl;
-      else window.open(spreadsheetUrl, '_blank');
-
-      showToast('Spreadsheet siap dan sudah terisi otomatis.');
+      const opened = window.open(spreadsheetUrl, '_blank');
+      if (opened){
+        showToast('Spreadsheet siap dan sudah terisi otomatis.');
+      } else {
+        showToastLink('Spreadsheet siap, tapi tab baru diblokir browser. Klik untuk membuka:', spreadsheetUrl);
+      }
     } catch(err){
       console.error(err);
-      if (newTab && !newTab.closed) newTab.close();
-      showToast('Gagal membuat spreadsheet. Periksa Client ID, izin akun Google, atau coba lagi.');
+      const detail = (err && err.error) ? err.error : (err && err.message ? err.message : 'lihat console (F12) untuk detail.');
+      showToast('Gagal membuat spreadsheet — ' + detail);
     }
-  }
-
-  function writeLoadingPage(win){
-    if (!win) return;
-    try{
-      win.document.write(`
-        <!DOCTYPE html><html><head><meta charset="utf-8"><title>Menyiapkan spreadsheet…</title>
-        <style>
-          body{background:#14171c;color:#ece8dc;font-family:'IBM Plex Mono',monospace;
-               display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}
-          .box{text-align:center;} .dot{animation:blink 1s step-start infinite;}
-          @keyframes blink{50%{opacity:0;}}
-        </style></head>
-        <body><div class="box">MENYIAPKAN SPREADSHEET<span class="dot">…</span></div></body></html>
-      `);
-      win.document.close();
-    } catch(e){ /* abaikan jika browser membatasi document.write lintas asal */ }
   }
 
   function buildTitle(){
@@ -861,6 +844,16 @@
     toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 7000);
+  }
+
+  function showToastLink(message, url){
+    const toast = document.getElementById('toast');
+    toast.innerHTML = escapeHtml(message) +
+      ' <a href="' + url + '" target="_blank" rel="noopener" style="color:var(--green);text-decoration:underline;font-weight:600;">Buka spreadsheet →</a>';
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    // Tetap tampil lebih lama karena butuh aksi klik dari pengguna.
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 25000);
   }
 
 })();
