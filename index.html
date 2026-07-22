@@ -6,6 +6,7 @@
 <title>MT940 // TELEX EXTRACTOR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
   :root{
     --ink:#14171c;
@@ -293,7 +294,7 @@
         </div>
         <div class="results-actions">
           <button class="btn btn-ghost" id="backBtn">↺ Berkas Baru</button>
-          <button class="btn btn-sheet" id="sheetBtn">⎙ Ekspor CSV</button>
+          <button class="btn btn-sheet" id="sheetBtn">▤ Ekspor Excel</button>
         </div>
       </div>
 
@@ -597,62 +598,211 @@
       ? '▾ Sembunyikan pesan mentah' : '▸ Tampilkan pesan mentah';
   });
 
-  // ---------------- EKSPOR CSV ----------------
+  // ---------------- EKSPOR EXCEL (.xlsx) ----------------
   document.getElementById('sheetBtn').addEventListener('click', () => {
-    exportCSV();
+    exportExcel();
   });
-
-  function exportCSV(){
-    if (!parsed){ return; }
-    const csv = buildCSV(parsed);
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = buildFileName();
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('Berkas CSV berhasil diunduh.');
-  }
 
   function buildFileName(){
     const stamp = new Date().toISOString().slice(0,10);
     const acc = (parsed.header.account || 'MT940').replace(/[^\w-]+/g,'_').trim();
-    return `MT940_${acc}_${stamp}.csv`;
+    return `MT940_${acc}_${stamp}.xlsx`;
   }
 
-  function csvField(v){
-    const s = (v === null || v === undefined) ? '' : String(v);
-    if (/[",\n]/.test(s)){
-      return '"' + s.replace(/"/g, '""') + '"';
+  const THIN = { style: 'thin', color: { argb: 'FF5B5E66' } };
+  const MED  = { style: 'medium', color: { argb: 'FF14171C' } };
+  const boxBorder = (top, left, bottom, right) => ({
+    top: top ? MED : THIN, left: left ? MED : THIN,
+    bottom: bottom ? MED : THIN, right: right ? MED : THIN
+  });
+
+  async function exportExcel(){
+    if (!parsed){ return; }
+    if (typeof ExcelJS === 'undefined'){
+      showToast('Gagal memuat pustaka Excel. Periksa koneksi internet lalu coba lagi.');
+      return;
     }
-    return s;
-  }
+    try{
+      showToast('Menyusun berkas Excel…');
+      const { header, transactions } = parsed;
+      const currency = (header.opening && header.opening.currency) || (header.closing && header.closing.currency) || 'IDR';
 
-  function buildCSV(parsedData){
-    const { header, transactions } = parsedData;
-    const rows = [];
-    rows.push(['Rekening', header.account || '']);
-    rows.push(['No. Statement', header.statementNumber || '']);
-    rows.push(['Referensi', header.reference || '']);
-    rows.push(['Saldo Awal', header.opening ? formatMoney(header.opening.amount, header.opening.currency) : '']);
-    rows.push(['Saldo Akhir', header.closing ? formatMoney(header.closing.amount, header.closing.currency) : '']);
-    rows.push(['']);
-    rows.push(['Tanggal Valuta','D/K','Jumlah','Tipe','Referensi','Bank Ref','Keterangan']);
-    transactions.forEach(tx => {
-      rows.push([
-        tx.valueDate,
-        tx.category === 'C' ? 'Kredit' : 'Debit',
-        tx.amount,
-        tx.typeCode || '',
-        tx.reference || '',
-        tx.bankRef || '',
-        tx.description || ''
-      ]);
-    });
-    return rows.map(r => r.map(csvField).join(',')).join('\r\n');
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'MT940 Telex Extractor';
+      wb.created = new Date();
+      const ws = wb.addWorksheet('Statement', { views: [{ showGridLines: false }] });
+
+      const COLS = 6; // No, Date, D/K, Description, Debit, Credit
+      ws.columns = [
+        { width: 5 }, { width: 14 }, { width: 6 }, { width: 40 }, { width: 18 }, { width: 18 }
+      ];
+
+      let r = 1;
+
+      // ---- TITLE BOX ----
+      ws.mergeCells(r, 1, r, COLS);
+      const titleCell = ws.getCell(r, 1);
+      titleCell.value = 'MT940 BANK STATEMENT';
+      titleCell.font = { name: 'IBM Plex Sans', size: 15, bold: true, color: { argb: 'FFFFFFFF' } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14171C' } };
+      ws.getRow(r).height = 24;
+      for (let c = 1; c <= COLS; c++){
+        ws.getCell(r, c).border = boxBorder(true, c===1, false, c===COLS);
+        ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14171C' } };
+      }
+      r++;
+
+      ws.mergeCells(r, 1, r, COLS);
+      const subCell = ws.getCell(r, 1);
+      subCell.value = 'Transaction Statement Report';
+      subCell.font = { name: 'IBM Plex Mono', size: 10, italic: true, color: { argb: 'FFECE8DC' } };
+      subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14171C' } };
+      ws.getRow(r).height = 18;
+      for (let c = 1; c <= COLS; c++){
+        ws.getCell(r, c).border = boxBorder(false, c===1, true, c===COLS);
+        ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14171C' } };
+      }
+      r++;
+
+      // ---- INFO BOX ----
+      const infoRows = [
+        ['Account Number', header.account || '—'],
+        ['Statement No.', header.statementNumber || '—'],
+        ['Reference', header.reference || '—'],
+        ['Currency', currency],
+        ['Opening Balance', header.opening ? formatMoney(header.opening.amount, header.opening.currency) : '—'],
+        ['Closing Balance', header.closing ? formatMoney(header.closing.amount, header.closing.currency) : '—'],
+        ['Total Transactions', String(transactions.length)]
+      ];
+      const infoStart = r;
+      infoRows.forEach(([label, value], idx) => {
+        ws.mergeCells(r, 1, r, 2);
+        ws.mergeCells(r, 3, r, COLS);
+        const lc = ws.getCell(r, 1);
+        lc.value = label;
+        lc.font = { name: 'IBM Plex Mono', size: 10, bold: true, color: { argb: 'FF20252D' } };
+        lc.alignment = { vertical: 'middle', indent: 1 };
+        lc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFECE8DC' } };
+        const vc = ws.getCell(r, 3);
+        vc.value = value;
+        vc.font = { name: 'IBM Plex Mono', size: 10, color: { argb: 'FF20252D' } };
+        vc.alignment = { vertical: 'middle', indent: 1 };
+        vc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+        const isFirst = idx === 0;
+        const isLast = idx === infoRows.length - 1;
+        for (let c = 1; c <= COLS; c++){
+          ws.getCell(r, c).border = boxBorder(isFirst, c===1, isLast, c===COLS);
+        }
+        r++;
+      });
+      r++; // spacer row
+
+      // ---- TRANSACTION TABLE HEADER ----
+      const headers = ['No', 'Date', 'D/K', 'Description', 'Debit', 'Credit'];
+      headers.forEach((h, i) => {
+        const c = ws.getCell(r, i + 1);
+        c.value = h;
+        c.font = { name: 'IBM Plex Mono', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+        c.alignment = { horizontal: (i===3) ? 'left' : 'center', vertical: 'middle', indent: i===3 ? 1 : 0 };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF20252D' } };
+        c.border = boxBorder(true, i===0, false, i===headers.length-1);
+      });
+      ws.getRow(r).height = 20;
+      r++;
+
+      // ---- TRANSACTION ROWS ----
+      const tableBodyStart = r;
+      transactions.forEach((tx, idx) => {
+        const rowNum = r;
+        const isLastTx = idx === transactions.length - 1;
+        const zebra = idx % 2 === 1;
+        const rowFill = zebra ? 'FFF3F1E9' : 'FFFFFFFF';
+
+        ws.getCell(rowNum, 1).value = idx + 1;
+        ws.getCell(rowNum, 1).alignment = { horizontal: 'center' };
+
+        ws.getCell(rowNum, 2).value = tx.valueDate;
+        ws.getCell(rowNum, 2).alignment = { horizontal: 'center' };
+
+        ws.getCell(rowNum, 3).value = tx.category;
+        ws.getCell(rowNum, 3).alignment = { horizontal: 'center' };
+        ws.getCell(rowNum, 3).font = { name: 'IBM Plex Mono', size: 10, bold: true,
+          color: { argb: tx.category === 'C' ? 'FF3F6B52' : 'FF7A4127' } };
+
+        const descText = [tx.reference, tx.description].filter(v => v && v !== '—').join(' — ');
+        ws.getCell(rowNum, 4).value = descText || '—';
+        ws.getCell(rowNum, 4).alignment = { horizontal: 'left', indent: 1, wrapText: false };
+
+        ws.getCell(rowNum, 5).value = tx.category === 'D' ? tx.amount : null;
+        ws.getCell(rowNum, 6).value = tx.category === 'C' ? tx.amount : null;
+
+        for (let c = 1; c <= COLS; c++){
+          const cell = ws.getCell(rowNum, c);
+          cell.font = cell.font || { name: 'IBM Plex Mono', size: 10, color: { argb: 'FF20252D' } };
+          if (c !== 3) cell.font = { name: 'IBM Plex Mono', size: 10, color: { argb: 'FF20252D' } };
+          if (c === 5 || c === 6){
+            cell.numFmt = `"${currency}" #,##0.00`;
+            cell.font = { name: 'IBM Plex Mono', size: 10, bold: true,
+              color: { argb: c === 5 ? 'FF7A4127' : 'FF3F6B52' } };
+          }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowFill } };
+          cell.border = boxBorder(false, c===1, isLastTx, c===COLS);
+        }
+        r++;
+      });
+
+      if (transactions.length === 0){
+        ws.mergeCells(r, 1, r, COLS);
+        const emptyCell = ws.getCell(r, 1);
+        emptyCell.value = 'Tidak ada baris transaksi (:61:) yang ditemukan pada berkas ini.';
+        emptyCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        emptyCell.font = { name: 'IBM Plex Mono', size: 10, italic: true, color: { argb: 'FF8D9099' } };
+        for (let c = 1; c <= COLS; c++){
+          ws.getCell(r, c).border = boxBorder(false, c===1, true, c===COLS);
+        }
+        r++;
+      }
+      r++; // spacer
+
+      // ---- FOOTER: SALDO AKHIR ----
+      ws.mergeCells(r, 1, r, COLS - 2);
+      const footLabel = ws.getCell(r, 1);
+      footLabel.value = 'SALDO AKHIR';
+      footLabel.font = { name: 'IBM Plex Mono', size: 11, bold: true, color: { argb: 'FFECE8DC' } };
+      footLabel.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+      footLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14171C' } };
+
+      ws.mergeCells(r, COLS - 1, r, COLS);
+      const footValue = ws.getCell(r, COLS - 1);
+      footValue.value = header.closing ? header.closing.amount : 0;
+      footValue.numFmt = `"${currency}" #,##0.00`;
+      footValue.font = { name: 'IBM Plex Mono', size: 11, bold: true, color: { argb: 'FF6FCF97' } };
+      footValue.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+      footValue.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14171C' } };
+
+      ws.getRow(r).height = 22;
+      for (let c = 1; c <= COLS; c++){
+        ws.getCell(r, c).border = boxBorder(true, c===1, true, c===COLS);
+        if (!ws.getCell(r, c).fill) ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14171C' } };
+      }
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = buildFileName();
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Berkas Excel berhasil diunduh.');
+    } catch(err){
+      console.error(err);
+      showToast('Gagal membuat berkas Excel — lihat console (F12) untuk detail.');
+    }
   }
 
   let toastTimer = null;
