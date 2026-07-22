@@ -6,7 +6,6 @@
 <title>MT940 // TELEX EXTRACTOR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="" async defer></script>
 <style>
   :root{
     --ink:#14171c;
@@ -294,7 +293,7 @@
         </div>
         <div class="results-actions">
           <button class="btn btn-ghost" id="backBtn">↺ Berkas Baru</button>
-          <button class="btn btn-sheet" id="sheetBtn">🖨 Ekspor CSV</button>
+          <button class="btn btn-sheet" id="sheetBtn">⎙ Ekspor CSV</button>
         </div>
       </div>
 
@@ -598,40 +597,71 @@
       ? '▾ Sembunyikan pesan mentah' : '▸ Tampilkan pesan mentah';
   });
 
-  // ---------------- BUKA SPREADSHEET ----------------
-  document.getElementById('sheetBtn').addEventListener('click', exportCSV);
+  // ---------------- EKSPOR CSV ----------------
+  document.getElementById('sheetBtn').addEventListener('click', () => {
+    exportCSV();
+  });
 
-  
-function exportCSV(){
-  if(!parsed) return;
-  const rows=buildValuesMatrix(parsed);
-  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('
-');
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=(fileName.replace(/\.[^.]+$/,'')||'mt940')+'_hasil.csv';
-  a.click();
-  URL.revokeObjectURL(a.href);
-  showToast('File CSV berhasil diekspor.');
-}
+  function exportCSV(){
+    if (!parsed){ return; }
+    const csv = buildCSV(parsed);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = buildFileName();
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Berkas CSV berhasil diunduh.');
+  }
 
-let toastTimer = null;
+  function buildFileName(){
+    const stamp = new Date().toISOString().slice(0,10);
+    const acc = (parsed.header.account || 'MT940').replace(/[^\w-]+/g,'_').trim();
+    return `MT940_${acc}_${stamp}.csv`;
+  }
+
+  function csvField(v){
+    const s = (v === null || v === undefined) ? '' : String(v);
+    if (/[",\n]/.test(s)){
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function buildCSV(parsedData){
+    const { header, transactions } = parsedData;
+    const rows = [];
+    rows.push(['Rekening', header.account || '']);
+    rows.push(['No. Statement', header.statementNumber || '']);
+    rows.push(['Referensi', header.reference || '']);
+    rows.push(['Saldo Awal', header.opening ? formatMoney(header.opening.amount, header.opening.currency) : '']);
+    rows.push(['Saldo Akhir', header.closing ? formatMoney(header.closing.amount, header.closing.currency) : '']);
+    rows.push(['']);
+    rows.push(['Tanggal Valuta','D/K','Jumlah','Tipe','Referensi','Bank Ref','Keterangan']);
+    transactions.forEach(tx => {
+      rows.push([
+        tx.valueDate,
+        tx.category === 'C' ? 'Kredit' : 'Debit',
+        tx.amount,
+        tx.typeCode || '',
+        tx.reference || '',
+        tx.bankRef || '',
+        tx.description || ''
+      ]);
+    });
+    return rows.map(r => r.map(csvField).join(',')).join('\r\n');
+  }
+
+  let toastTimer = null;
   function showToast(html){
     const toast = document.getElementById('toast');
     toast.innerHTML = html;
     toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 7000);
-  }
-
-  function showToastLink(message, url){
-    const toast = document.getElementById('toast');
-    toast.innerHTML = escapeHtml(message) +
-      ' <a href="' + url + '" target="_blank" rel="noopener" style="color:var(--green);text-decoration:underline;font-weight:600;">Buka spreadsheet →</a>';
-    toast.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 25000);
   }
 
 })();
