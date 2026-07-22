@@ -251,13 +251,13 @@
 
     <!-- SCREEN 1: UPLOAD -->
     <section id="screen-upload" class="screen active">
-      <div class="eyebrow">Langkah 01 — Unggah Pesan</div>
+      <div class="eyebrow">Upload File</div>
       <h1>Ekstrak rekening koran<br>format MT940.</h1>
-      <p class="lede">Jatuhkan berkas .STA / .940 / .MT940 di sini. Sistem akan membaca setiap tag SWIFT (:20:, :61:, :86:, dst) dan menyusun ulang menjadi tabel transaksi yang rapi.</p>
+      <p class="lede">Upload berkas .STA / .940 / .MT940 di sini. Sistem akan membaca setiap tag SWIFT (:20:, :61:, :86:, dst) dan menyusun ulang menjadi tabel transaksi yang rapi.</p>
 
       <div class="dropzone" id="dropzone">
         <div class="slot">⇩</div>
-        <div class="instr">Klik untuk memilih berkas, atau <b>seret &amp; lepas</b> di sini</div>
+        <div class="instr">Klik untuk memilih berkas, atau <b>Drag &amp; Drop</b> di sini</div>
         <div class="sub">.STA · .940 · .MT940 · .TXT</div>
       </div>
       <input type="file" id="fileInput" accept=".sta,.940,.mt940,.txt">
@@ -279,7 +279,7 @@
 
     <!-- SCREEN 2: PROCESSING -->
     <section id="screen-processing" class="screen">
-      <div class="eyebrow">Langkah 02 — Memproses</div>
+      <div class="eyebrow">Process...</div>
       <h1>Membaca telex…</h1>
       <div class="telex-label">Log Parser</div>
       <div class="telex" id="telexLog"><span class="cursor"></span></div>
@@ -289,7 +289,7 @@
     <section id="screen-results" class="screen">
       <div class="results-head">
         <div>
-          <div class="eyebrow">Langkah 03 — Hasil</div>
+          <div class="eyebrow">Result</div>
           <h1>Hasil ekstraksi</h1>
         </div>
         <div class="results-actions">
@@ -301,6 +301,7 @@
       <div class="statement-panel" id="statementPanel"></div>
 
       <div class="table-wrap">
+        
         <table>
           <thead>
             <tr>
@@ -315,6 +316,9 @@
           <tbody id="txBody"></tbody>
         </table>
       </div>
+      <div class="table-more" style="text-align:center;margin-top:18px;">
+    <button class="btn btn-ghost" id="loadMoreBtn" style="display:none;"></button>
+</div>
 
       <div class="raw-toggle" id="rawToggle">▸ Tampilkan pesan mentah</div>
       <div class="raw-panel" id="rawPanel"></div>
@@ -330,6 +334,8 @@
 <div id="toast"></div>
 
 <script>
+  let visibleRows = 20;
+const ROWS_PER_LOAD = 20;
 (function(){
   "use strict";
 
@@ -399,6 +405,10 @@
 
   // ---------------- MT940 PARSER ----------------
   function parseMT940(raw){
+    raw = raw
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
     const lines = raw.replace(/\r/g,'').split('\n');
     const tagRe = /^:([0-9]{2}[A-Z]?):(.*)$/;
     const records = [];
@@ -418,14 +428,38 @@
 
     for (const rec of records){
       const tag = rec.tag;
-      const content = rec.content.trim();
+      const content = rec.content
+    .replace(/```/g, "")
+    .replace(/-}/g, "")
+    .trim();
 
       if (tag === '20') header.reference = content;
       else if (tag === '25') header.account = content;
       else if (tag === '28C' || tag === '28') header.statementNumber = content;
       else if (tag === '60F' || tag === '60M') header.opening = parseBalance(content);
-      else if (tag === '62F' || tag === '62M') header.closing = parseBalance(content);
-      else if (tag === '64') header.closingAvailable = parseBalance(content);
+      else if(
+    tag=="62F"||
+    tag=="62M"||
+    tag=="64"||
+    tag=="65"
+){
+
+    const bal=parseBalance(content);
+
+    if(bal){
+
+        if(tag=="64")
+            header.availableBalance=bal;
+
+        else if(tag=="65")
+            header.forwardBalance=bal;
+
+        else
+            header.closing=bal;
+
+    }
+
+}
       else if (tag === '61'){
         current = parseTransactionLine(content);
         transactions.push(current);
@@ -435,20 +469,42 @@
         else if (current) current.description += ' ' + content;
         else header.narrative = (header.narrative ? header.narrative + ' ' : '') + content;
       }
+      else if (tag === '62F' || tag === '62M') {
+          console.log("Closing raw =", content);
+          header.closing = parseBalance(content);
+          console.log("Closing parsed =", header.closing);
+      }
     }
 
     return { header, transactions };
   }
 
   function parseBalance(content){
-    const m = content.match(/^([CD])(\d{6})([A-Z]{3})([\d,]+)$/);
-    if (!m) return null;
-    return {
-      dc: m[1],
-      date: formatDate(m[2]),
-      currency: m[3],
-      amount: parseAmount(m[4])
-    };
+content = content
+    .replace(/```/g, "")
+    .replace(/-}/g, "")
+    .trim();
+      content = content.trim();
+
+      const m = content.match(
+          /^([CD])(\d{6})([A-Z]{3})([\d.,]+)$/i
+      );
+
+      if(!m){
+          console.warn("Balance gagal diparse :", content);
+          return null;
+      }
+
+      return{
+          dc:m[1].toUpperCase(),
+          date:formatDate(m[2]),
+          currency:m[3].toUpperCase(),
+          amount:Number(
+              m[4]
+                  .replace(/\./g,"")
+                  .replace(",",".")
+          )
+      };
   }
 
   function parseAmount(s){
@@ -464,30 +520,73 @@
 
   function parseTransactionLine(content){
 
-    const m = content.match(/^(\d{6})(\d{4})?(RC|RD|C|D)([A-Z])?(\d+,\d{0,2})([A-Za-z0-9]{0,4})?(.*)$/);
-    if (!m){
-      return { valueDate: '—', category: 'D', dcRaw: '?', amount: 0, typeCode: '', reference: content, description: '' };
-    }
-    const [, valDate, , dcRaw, , amtRaw, typeCode, rest] = m;
-    const category = (dcRaw === 'C' || dcRaw === 'RD') ? 'C' : 'D';
+      const re =
+      /^(\d{6})(\d{4})?([R]?[CD])([A-Z])?([\d.,]+)([A-Z0-9]{0,4})?(.*)$/i;
 
-    let reference = (rest || '').trim();
-    let bankRef = '';
-    if (reference.includes('//')){
-      const parts = reference.split('//');
-      reference = parts[0].trim();
-      bankRef = parts.slice(1).join('//').trim();
-    }
+      const m = content.match(re);
 
-    return {
-      valueDate: formatDate(valDate),
-      dcRaw, category,
-      amount: parseAmount(amtRaw),
-      typeCode: (typeCode || '').trim(),
-      reference: reference || bankRef || '—',
-      bankRef,
-      description: ''
-    };
+      if(!m){
+
+          return{
+              valueDate:"—",
+              category:"D",
+              dcRaw:"",
+              amount:0,
+              typeCode:"",
+              reference:content,
+              bankRef:"",
+              description:""
+          };
+
+      }
+
+      const
+      valueDate=m[1],
+      dcRaw=m[3].toUpperCase(),
+      amount=m[5],
+      typeCode=(m[6]||"").trim(),
+      rest=(m[7]||"").trim();
+
+      let reference=rest;
+      let bankRef="";
+
+      if(reference.includes("//")){
+
+          const p=reference.split("//");
+
+          reference=p[0].trim();
+
+          bankRef=p.slice(1).join("//").trim();
+
+      }
+
+      return{
+
+          valueDate:formatDate(valueDate),
+
+          dcRaw,
+
+          category:
+              dcRaw.includes("C")
+              ?"C"
+              :"D",
+
+          amount:Number(
+              amount
+                  .replace(/\./g,"")
+                  .replace(",",".")
+          ),
+
+          typeCode,
+
+          reference:reference||bankRef||"—",
+
+          bankRef,
+
+          description:""
+
+      };
+
   }
 
   // ---------------- TELEX PROCESSING ANIMATION ----------------
@@ -518,11 +617,63 @@
     }
     next();
   }
+function updateLoadMoreButton() {
 
+    const btn = document.getElementById("loadMoreBtn");
+
+    if (!parsed) {
+        btn.style.display = "none";
+        return;
+    }
+
+    const total = parsed.transactions.length;
+
+    if (total <= ROWS_PER_LOAD) {
+        btn.style.display = "none";
+        return;
+    }
+
+    btn.style.display = "inline-block";
+
+    if (visibleRows < total) {
+
+        btn.textContent =
+            `▼ Tampilkan ${Math.min(ROWS_PER_LOAD, total - visibleRows)} Transaksi Lagi`;
+
+    } else {
+
+        btn.textContent = "▲ Sembunyikan";
+
+    }
+
+}
+document.getElementById("loadMoreBtn").addEventListener("click", () => {
+
+    const total = parsed.transactions.length;
+
+    if (visibleRows < total) {
+
+        visibleRows += ROWS_PER_LOAD;
+
+        if (visibleRows > total)
+            visibleRows = total;
+
+    } else {
+
+        visibleRows = ROWS_PER_LOAD;
+
+    }
+
+    renderResults();
+
+});
   // ---------------- RENDER RESULTS ----------------
   function renderResults(){
     const { header, transactions } = parsed;
-
+const closing =
+    header.closing ||
+    header.availableBalance ||
+    header.forwardBalance;
     const panel = document.getElementById('statementPanel');
     const currency = (header.opening && header.opening.currency) || (header.closing && header.closing.currency) || '';
     panel.innerHTML = `
@@ -530,7 +681,14 @@
       <div class="stat"><div class="k">No. Statement</div><div class="v">${escapeHtml(header.statementNumber || '—')}</div></div>
       <div class="stat"><div class="k">Referensi</div><div class="v">${escapeHtml(header.reference || '—')}</div></div>
       <div class="stat"><div class="k">Saldo Awal</div><div class="v ${header.opening && header.opening.dc==='D' ? 'debit':'credit'}">${header.opening ? formatMoney(header.opening.amount, header.opening.currency) : '—'}</div></div>
-      <div class="stat"><div class="k">Saldo Akhir</div><div class="v ${header.closing && header.closing.dc==='D' ? 'debit':'credit'}">${header.closing ? formatMoney(header.closing.amount, header.closing.currency) : '—'}</div></div>
+     <div class="stat">
+    <div class="k">Saldo Akhir</div>
+    <div class="v ${header.closing && header.closing.dc==='D' ? 'debit':'credit'}">
+        ${header.closing
+            ? formatMoney(header.closing.amount, header.closing.currency)
+            : '—'}
+    </div>
+</div>
       <div class="stat"><div class="k">Jumlah Transaksi</div><div class="v">${transactions.length}</div></div>
     `;
 
@@ -538,7 +696,9 @@
     if (transactions.length === 0){
       tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--paper-dimmer);padding:30px;">Tidak ada baris transaksi (:61:) yang ditemukan pada berkas ini.</td></tr>`;
     } else {
-      tbody.innerHTML = transactions.map(tx => `
+      const rows = transactions.slice(0, visibleRows);
+
+tbody.innerHTML = rows.map(tx => `
         <tr>
           <td>${escapeHtml(tx.valueDate)}</td>
           <td class="mark"><span class="mark-badge ${tx.category==='C'?'credit':'debit'}">${tx.category==='C'?'K':'D'}</span></td>
@@ -551,6 +711,7 @@
     }
 
     document.getElementById('rawPanel').textContent = rawText;
+    updateLoadMoreButton();
   }
 
   function formatMoney(n, currency){
@@ -576,6 +737,7 @@
 
     showScreen('processing');
     runTelexAnimation(() => {
+      visibleRows = ROWS_PER_LOAD;
       renderResults();
       showScreen('results');
     });
