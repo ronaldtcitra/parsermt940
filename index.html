@@ -6,7 +6,7 @@
 <title>MT940 // TELEX EXTRACTOR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="" async defer></script>
 <style>
   :root{
     --ink:#14171c;
@@ -294,7 +294,7 @@
         </div>
         <div class="results-actions">
           <button class="btn btn-ghost" id="backBtn">↺ Berkas Baru</button>
-          <button class="btn btn-sheet" id="sheetBtn">⧉ Buka Spreadsheet</button>
+          <button class="btn btn-sheet" id="sheetBtn">🖨 Ekspor CSV</button>
         </div>
       </div>
 
@@ -332,49 +332,6 @@
 <script>
 (function(){
   "use strict";
-
-  // ---------------- KONFIGURASI GOOGLE OAUTH ----------------
-  // 1. Buat OAuth Client ID (tipe "Web application") di Google Cloud Console.
-  // 2. Tambahkan origin tempat berkas ini di-hosting ke "Authorized JavaScript origins"
-  //    (mis. http://localhost:8000 — bukan file://).
-  // 3. Tempel Client ID Anda di bawah ini, ganti seluruh string placeholder-nya.
-  const GOOGLE_CLIENT_ID = '687996343164-s6h6t1pkbftfq9jsc86r54sfkpqh3mai.apps.googleusercontent.com';
-  const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
-  // Pengecekan format, bukan membandingkan dengan teks placeholder — supaya tidak salah lagi
-  // seperti sebelumnya kalau string di atas diedit/ditempel ulang.
-  const OAUTH_CONFIGURED = /^[0-9]+-[0-9a-zA-Z]+\.apps\.googleusercontent\.com$/.test(GOOGLE_CLIENT_ID);
-  if (!OAUTH_CONFIGURED){
-    console.warn('GOOGLE_CLIENT_ID tidak valid atau belum diisi — tombol "Buka Spreadsheet" akan memakai mode salin-tempel manual.');
-  }
-
-  let tokenClient = null;
-  let cachedToken = null;
-
-  if (OAUTH_CONFIGURED && window.google && window.google.accounts){
-    initTokenClient();
-  } else if (OAUTH_CONFIGURED){
-    window.addEventListener('load', initTokenClient);
-  }
-
-  function initTokenClient(){
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
-      scope: SHEETS_SCOPE,
-      callback: () => {} // diisi ulang tiap request, lihat requestAccessToken()
-    });
-  }
-
-  function requestAccessToken(){
-    return new Promise((resolve, reject) => {
-      if (!tokenClient){ reject(new Error('Token client belum siap.')); return; }
-      tokenClient.callback = (resp) => {
-        if (resp.error){ reject(resp); return; }
-        cachedToken = resp.access_token;
-        resolve(cachedToken);
-      };
-      tokenClient.requestAccessToken({ prompt: cachedToken ? '' : 'consent' });
-    });
-  }
 
   // ---------------- STATE ----------------
   let rawText = "";
@@ -506,8 +463,7 @@
   }
 
   function parseTransactionLine(content){
-    // 6!n date, optional 4!n entry date, D/C mark (C/D/RC/RD), optional 1!a fund code,
-    // amount (comma decimal), optional type code, reference, optional //bank ref
+
     const m = content.match(/^(\d{6})(\d{4})?(RC|RD|C|D)([A-Z])?(\d+,\d{0,2})([A-Za-z0-9]{0,4})?(.*)$/);
     if (!m){
       return { valueDate: '—', category: 'D', dcRaw: '?', amount: 0, typeCode: '', reference: content, description: '' };
@@ -643,201 +599,24 @@
   });
 
   // ---------------- BUKA SPREADSHEET ----------------
-  document.getElementById('sheetBtn').addEventListener('click', () => {
-    if (OAUTH_CONFIGURED) createRealSpreadsheet();
-    else copyPasteFallback();
-  });
+  document.getElementById('sheetBtn').addEventListener('click', exportCSV);
 
-  // Mode fallback: tanpa Client ID, buka Sheets kosong + salin data ke clipboard.
-  function copyPasteFallback(){
-    const sheetWindow = window.open('https://docs.google.com/spreadsheets/create', '_blank');
-    const tsv = buildTSV(parsed);
-    copyToClipboard(tsv).then(ok => {
-      if (ok){
-        showToast('Mode manual (Client ID belum dikonfigurasi). Data disalin — klik sel A1 di tab baru lalu tekan <b>Ctrl+V</b>.');
-      } else {
-        showToast('Tab spreadsheet terbuka. Klipboard tidak dapat diakses — salin data manual dari panel "pesan mentah".');
-      }
-    });
-    if (!sheetWindow) showToast('Popup diblokir browser. Izinkan popup untuk situs ini lalu coba lagi.');
-  }
+  
+function exportCSV(){
+  if(!parsed) return;
+  const rows=buildValuesMatrix(parsed);
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('
+');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=(fileName.replace(/\.[^.]+$/,'')||'mt940')+'_hasil.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('File CSV berhasil diekspor.');
+}
 
-  // Mode asli: buat & isi spreadsheet lewat Google Sheets API.
-  async function createRealSpreadsheet(){
-    try{
-      // PENTING: requestAccessToken() harus jadi popup PERTAMA yang dipicu langsung
-      // dari klik pengguna. Kalau ada window.open() lain sebelum ini, popup Google
-      // akan diblokir browser ("Failed to open popup window").
-      showToast('Menghubungkan ke akun Google… izinkan popup jika muncul permintaan.');
-      const token = await requestAccessToken();
-
-      showToast('Membuat spreadsheet baru…');
-      const { spreadsheetId, spreadsheetUrl } = await createSpreadsheet(token, buildTitle());
-
-      showToast('Mengisi data ekstraksi…');
-      await fillSpreadsheet(token, spreadsheetId, parsed);
-      await formatSpreadsheet(token, spreadsheetId);
-
-      const opened = window.open(spreadsheetUrl, '_blank');
-      if (opened){
-        showToast('Spreadsheet siap dan sudah terisi otomatis.');
-      } else {
-        showToastLink('Spreadsheet siap, tapi tab baru diblokir browser. Klik untuk membuka:', spreadsheetUrl);
-      }
-    } catch(err){
-      console.error(err);
-      const detail = (err && err.error) ? err.error : (err && err.message ? err.message : 'lihat console (F12) untuk detail.');
-      showToast('Gagal membuat spreadsheet — ' + detail);
-    }
-  }
-
-  function buildTitle(){
-    const stamp = new Date().toISOString().slice(0,16).replace('T',' ');
-    const acc = (parsed.header.account || 'MT940').replace(/[^\w-]+/g,' ').trim();
-    return `MT940 — ${acc} — ${stamp}`;
-  }
-
-  async function createSpreadsheet(token, title){
-    const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        properties: { title },
-        sheets: [{ properties: { title: 'Transaksi', gridProperties: { frozenRowCount: 8 } } }]
-      })
-    });
-    if (!res.ok) throw new Error('Gagal membuat spreadsheet: ' + res.status);
-    const data = await res.json();
-    return { spreadsheetId: data.spreadsheetId, spreadsheetUrl: data.spreadsheetUrl };
-  }
-
-  async function fillSpreadsheet(token, spreadsheetId, parsedData){
-    const values = buildValuesMatrix(parsedData);
-    const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Transaksi!A1?valueInputOption=USER_ENTERED`,
-      {
-        method: 'PUT',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ values })
-      }
-    );
-    if (!res.ok) throw new Error('Gagal mengisi data: ' + res.status);
-  }
-
-  async function formatSpreadsheet(token, spreadsheetId){
-    // Tebalkan baris judul kolom transaksi (baris ke-8, index 7) & lebarkan kolom otomatis.
-    const requests = [
-      {
-        repeatCell: {
-          range: { sheetId: 0, startRowIndex: 7, endRowIndex: 8 },
-          cell: { userEnteredFormat: { textFormat: { bold: true } } },
-          fields: 'userEnteredFormat.textFormat.bold'
-        }
-      },
-      {
-        repeatCell: {
-          range: { sheetId: 0, startRowIndex: 0, endRowIndex: 1 },
-          cell: { userEnteredFormat: { textFormat: { bold: true } } },
-          fields: 'userEnteredFormat.textFormat.bold'
-        }
-      },
-      {
-        autoResizeDimensions: {
-          dimensions: { sheetId: 0, dimension: 'COLUMNS', startIndex: 0, endIndex: 7 }
-        }
-      }
-    ];
-    const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ requests })
-      }
-    );
-    if (!res.ok){ /* formatting gagal bukan hal fatal, biarkan lanjut */ console.warn('Format gagal:', res.status); }
-  }
-
-  function buildValuesMatrix(parsedData){
-    const { header, transactions } = parsedData;
-    const rows = [];
-    rows.push(['Rekening', header.account || '']);
-    rows.push(['No. Statement', header.statementNumber || '']);
-    rows.push(['Referensi', header.reference || '']);
-    rows.push(['Saldo Awal', header.opening ? formatMoney(header.opening.amount, header.opening.currency) : '']);
-    rows.push(['Saldo Akhir', header.closing ? formatMoney(header.closing.amount, header.closing.currency) : '']);
-    rows.push(['']);
-    rows.push(['']);
-    rows.push(['Tanggal Valuta','D/K','Jumlah','Tipe','Referensi','Bank Ref','Keterangan']);
-    transactions.forEach(tx => {
-      rows.push([
-        tx.valueDate,
-        tx.category === 'C' ? 'Kredit' : 'Debit',
-        tx.amount,
-        tx.typeCode || '',
-        tx.reference || '',
-        tx.bankRef || '',
-        tx.description || ''
-      ]);
-    });
-    return rows;
-  }
-
-  function buildTSV(parsedData){
-    const { header, transactions } = parsedData;
-    const rows = [];
-    rows.push(['Rekening', header.account || '']);
-    rows.push(['No. Statement', header.statementNumber || '']);
-    rows.push(['Referensi', header.reference || '']);
-    rows.push(['Saldo Awal', header.opening ? formatMoney(header.opening.amount, header.opening.currency) : '']);
-    rows.push(['Saldo Akhir', header.closing ? formatMoney(header.closing.amount, header.closing.currency) : '']);
-    rows.push(['']);
-    rows.push(['Tanggal Valuta','D/K','Jumlah','Tipe','Referensi','Bank Ref','Keterangan']);
-    transactions.forEach(tx => {
-      rows.push([
-        tx.valueDate,
-        tx.category === 'C' ? 'Kredit' : 'Debit',
-        tx.amount,
-        tx.typeCode || '',
-        tx.reference || '',
-        tx.bankRef || '',
-        tx.description || ''
-      ]);
-    });
-    return rows.map(r => r.join('\t')).join('\n');
-  }
-
-  async function copyToClipboard(text){
-    try{
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch(err){
-      try{
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        return true;
-      } catch(err2){
-        return false;
-      }
-    }
-  }
-
-  let toastTimer = null;
+let toastTimer = null;
   function showToast(html){
     const toast = document.getElementById('toast');
     toast.innerHTML = html;
@@ -852,7 +631,6 @@
       ' <a href="' + url + '" target="_blank" rel="noopener" style="color:var(--green);text-decoration:underline;font-weight:600;">Buka spreadsheet →</a>';
     toast.classList.add('show');
     clearTimeout(toastTimer);
-    // Tetap tampil lebih lama karena butuh aksi klik dari pengguna.
     toastTimer = setTimeout(() => toast.classList.remove('show'), 25000);
   }
 
