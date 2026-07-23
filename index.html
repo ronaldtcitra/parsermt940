@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --ink:#14171c;
@@ -234,6 +235,57 @@
     .results-head{flex-direction:column;}
     .actions{flex-wrap:wrap;}
   }
+
+  /* ---------- RECONCILIATION SECTION ---------- */
+  .recon-section{margin-top:56px;border-top:1px solid var(--border-strong);padding-top:40px;}
+  .recon-head h1{font-size:24px;}
+  .recon-dropzone{padding:34px 24px;}
+  .recon-dropzone .slot{font-size:30px;margin-bottom:12px;}
+
+  .recon-summary{
+    border:1px solid var(--border);background:var(--panel);
+    padding:20px 24px;margin:24px 0;display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:20px;
+  }
+  .recon-summary .stat .v.warn{color:var(--amber);}
+  .recon-summary .stat .v.zero{color:var(--paper-dim);}
+
+  .recon-tabs{display:flex;gap:8px;margin:26px 0 16px;flex-wrap:wrap;}
+  .recon-tab{
+    font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;
+    padding:9px 16px;border:1px solid var(--border-strong);background:transparent;
+    color:var(--paper-dim);cursor:pointer;transition:all .15s;
+  }
+  .recon-tab .count{color:var(--paper-dimmer);margin-left:6px;}
+  .recon-tab.active{background:var(--panel-2);border-color:var(--paper-dim);color:var(--paper);}
+  .recon-tab.active .count{color:var(--amber);}
+  .recon-tab:hover{border-color:var(--paper-dim);}
+
+  .recon-panel{display:none;}
+  .recon-panel.active{display:block;animation:fadein .3s ease;}
+
+  .match-badge{
+    display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;
+    padding:2px 8px;border-radius:2px;letter-spacing:0.5px;
+  }
+  .match-badge.high{background:rgba(111,207,151,0.15);color:var(--green);}
+  .match-badge.mid{background:rgba(212,162,76,0.15);color:var(--amber);}
+  .match-badge.low{background:rgba(193,101,47,0.15);color:var(--rust);}
+
+  td.pair-row{padding:0;border-bottom:1px solid var(--border);}
+  .pair-grid{display:grid;grid-template-columns:1fr 1fr;}
+  .pair-col{padding:13px 14px;}
+  .pair-col.bank-col{border-right:1px solid var(--border);}
+  .pair-col-label{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--paper-dimmer);text-transform:uppercase;margin-bottom:6px;}
+  @media(max-width:640px){.pair-grid{grid-template-columns:1fr;}.pair-col.bank-col{border-right:none;border-bottom:1px solid var(--border);}}
+
+  .recon-empty{padding:36px;text-align:center;color:var(--paper-dimmer);font-family:var(--mono);font-size:12.5px;}
+
+  .field-row{display:flex;gap:20px;flex-wrap:wrap;margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--paper-dim);}
+  .field-check{display:flex;align-items:center;gap:8px;cursor:pointer;}
+  .field-check input{accent-color:var(--amber);width:14px;height:14px;cursor:pointer;}
+  .col-map{margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--paper-dimmer);border-left:2px solid var(--border-strong);padding-left:10px;line-height:1.9;}
+  .col-map b{color:var(--paper-dim);}
 </style>
 </head>
 <body>
@@ -325,6 +377,83 @@
 
       <div class="footnote">
         <span class="tag-chip">i</span>Parser membaca tag standar SWIFT MT940 (:20: :25: :28C: :60F/M: :61: :86: :62F/M:). Berkas non-standar atau varian bank tertentu mungkin memerlukan penyesuaian manual — gunakan panel pesan mentah di atas untuk memverifikasi.
+      </div>
+
+      <!-- RECONCILIATION SECTION -->
+      <div class="recon-section" id="reconSection">
+        <div class="recon-head">
+          <div class="eyebrow">Rekonsiliasi</div>
+          <h1>Cocokkan dengan catatan internal</h1>
+          <p class="lede">Upload berkas CSV / Excel catatan kas atau ledger internal Anda. Sistem otomatis mendeteksi kolom tanggal, keterangan, dan jumlah, lalu mencocokkannya dengan transaksi rekening koran berdasarkan jumlah, tanggal, dan kemiripan deskripsi/referensi.</p>
+
+          <div class="dropzone recon-dropzone" id="reconDropzone">
+            <div class="slot">⇩</div>
+            <div class="instr">Klik untuk memilih berkas, atau <b>Drag &amp; Drop</b> di sini</div>
+            <div class="sub">.CSV · .XLSX · .XLS</div>
+          </div>
+          <input type="file" id="reconFileInput" accept=".csv,.xlsx,.xls">
+
+          <div class="filecard" id="reconFilecard">
+            <div>
+              <div class="fname" id="reconFname">—</div>
+              <div class="fmeta" id="reconFmeta">—</div>
+            </div>
+            <button class="remove" id="reconRemoveFile">HAPUS</button>
+          </div>
+
+          <div class="col-map" id="reconColMap" style="display:none;"></div>
+
+          <div class="field-row">
+            <label class="field-check">
+              <input type="checkbox" id="reconInvertSign">
+              Balik tanda debit/kredit (jika hasil pencocokan terbalik)
+            </label>
+          </div>
+
+          <div class="error-msg" id="reconErrorMsg">Kolom tanggal / jumlah tidak terdeteksi pada berkas ini. Pastikan berkas memiliki header kolom seperti "Tanggal", "Keterangan", dan "Jumlah".</div>
+
+          <div class="actions">
+            <button class="btn btn-primary" id="reconBtn" disabled>▸ Jalankan Rekonsiliasi</button>
+            <button class="btn btn-sheet" id="reconExportBtn" style="display:none;">▤ Ekspor Hasil</button>
+          </div>
+        </div>
+
+        <div id="reconResults" style="display:none;">
+          <div class="recon-summary" id="reconSummary"></div>
+
+          <div class="recon-tabs" id="reconTabs">
+            <button class="recon-tab active" data-tab="matched">Cocok <span class="count" id="cntMatched">0</span></button>
+            <button class="recon-tab" data-tab="unbank">Bank Tanpa Pasangan <span class="count" id="cntUnbank">0</span></button>
+            <button class="recon-tab" data-tab="unledger">Internal Tanpa Pasangan <span class="count" id="cntUnledger">0</span></button>
+          </div>
+
+          <div class="recon-panel active" id="panel-matched">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Pasangan Transaksi (Bank ↔ Internal)</th><th style="text-align:center;width:90px;">Keyakinan</th></tr></thead>
+                <tbody id="matchedBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="recon-panel" id="panel-unbank">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Valuta</th><th class="mark">D/K</th><th style="text-align:right">Jumlah</th><th>Referensi</th><th>Keterangan</th></tr></thead>
+                <tbody id="unbankBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="recon-panel" id="panel-unledger">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Tanggal</th><th class="mark">D/K</th><th style="text-align:right">Jumlah</th><th>Keterangan</th></tr></thead>
+                <tbody id="unledgerBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -750,6 +879,7 @@ tbody.innerHTML = rows.map(tx => `
     fileInput.value = "";
     document.getElementById('rawPanel').classList.remove('active');
     document.getElementById('rawToggle').textContent = '▸ Tampilkan pesan mentah';
+    resetRecon();
     showScreen('upload');
   });
 
@@ -974,6 +1104,491 @@ tbody.innerHTML = rows.map(tx => `
     toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 7000);
+  }
+
+  // ================= RECONCILIATION MODULE =================
+  const DATE_TOLERANCE_DAYS = 7;
+  const AMOUNT_EPS = 1; // toleransi pembulatan rupiah
+
+  let reconRows = null;
+  let reconColMap = null;
+  let reconResult = null;
+
+  const reconDropzone   = document.getElementById('reconDropzone');
+  const reconFileInput  = document.getElementById('reconFileInput');
+  const reconFilecard   = document.getElementById('reconFilecard');
+  const reconFnameEl    = document.getElementById('reconFname');
+  const reconFmetaEl    = document.getElementById('reconFmeta');
+  const reconRemoveBtn  = document.getElementById('reconRemoveFile');
+  const reconBtn        = document.getElementById('reconBtn');
+  const reconErrorMsg   = document.getElementById('reconErrorMsg');
+  const reconColMapEl   = document.getElementById('reconColMap');
+  const reconInvertSign = document.getElementById('reconInvertSign');
+  const reconExportBtn  = document.getElementById('reconExportBtn');
+  const reconResultsEl  = document.getElementById('reconResults');
+
+  reconDropzone.addEventListener('click', () => reconFileInput.click());
+  reconDropzone.addEventListener('dragover', e => { e.preventDefault(); reconDropzone.classList.add('drag'); });
+  reconDropzone.addEventListener('dragleave', () => reconDropzone.classList.remove('drag'));
+  reconDropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    reconDropzone.classList.remove('drag');
+    if (e.dataTransfer.files.length) handleReconFile(e.dataTransfer.files[0]);
+  });
+  reconFileInput.addEventListener('change', e => {
+    if (e.target.files.length) handleReconFile(e.target.files[0]);
+  });
+  reconRemoveBtn.addEventListener('click', resetRecon);
+  reconBtn.addEventListener('click', () => {
+    if (!parsed || !reconRows) return;
+    try{
+      const ledgerList = buildLedgerRecords(reconRows, reconColMap, reconInvertSign.checked);
+      if (!ledgerList.length){
+        reconErrorMsg.textContent = 'Tidak ada baris dengan tanggal & jumlah yang valid pada berkas ini.';
+        reconErrorMsg.classList.add('active');
+        return;
+      }
+      reconErrorMsg.classList.remove('active');
+      const bankList = buildBankList(parsed.transactions);
+      reconResult = runReconciliation(bankList, ledgerList);
+      renderReconResults();
+      reconResultsEl.style.display = 'block';
+      reconExportBtn.style.display = 'inline-block';
+    } catch(err){
+      console.error(err);
+      showToast('Gagal menjalankan rekonsiliasi — lihat console (F12) untuk detail.');
+    }
+  });
+  reconExportBtn.addEventListener('click', () => exportReconciliation());
+
+  document.querySelectorAll('.recon-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.recon-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.recon-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  function resetRecon(){
+    reconRows = null; reconColMap = null; reconResult = null;
+    reconFilecard.classList.remove('active');
+    reconColMapEl.style.display = 'none';
+    reconColMapEl.innerHTML = '';
+    reconBtn.disabled = true;
+    reconErrorMsg.classList.remove('active');
+    reconFileInput.value = '';
+    reconInvertSign.checked = false;
+    reconResultsEl.style.display = 'none';
+    reconExportBtn.style.display = 'none';
+  }
+
+  async function handleReconFile(file){
+    reconErrorMsg.classList.remove('active');
+    try{
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+      const sheetName = wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (!rows.length){
+        reconErrorMsg.textContent = 'Berkas kosong atau tidak memiliki baris data.';
+        reconErrorMsg.classList.add('active');
+        return;
+      }
+      const headers = Object.keys(rows[0]);
+      const colMap = detectColumns(headers);
+      if (!colMap.date || (!colMap.amount && !colMap.debit && !colMap.credit)){
+        reconErrorMsg.classList.add('active');
+        reconBtn.disabled = true;
+        reconFilecard.classList.remove('active');
+        return;
+      }
+      reconRows = rows;
+      reconColMap = colMap;
+      reconFnameEl.textContent = file.name;
+      reconFmetaEl.textContent = (file.size/1024).toFixed(1) + ' KB · ' + rows.length + ' baris';
+      reconFilecard.classList.add('active');
+      reconColMapEl.style.display = 'block';
+      reconColMapEl.innerHTML =
+        `Kolom terdeteksi — <b>Tanggal</b>: ${escapeHtml(colMap.date)}` +
+        (colMap.desc ? ` · <b>Keterangan</b>: ${escapeHtml(colMap.desc)}` : '') +
+        (colMap.ref ? ` · <b>Referensi</b>: ${escapeHtml(colMap.ref)}` : '') +
+        (colMap.debit || colMap.credit
+          ? ` · <b>Debit</b>: ${escapeHtml(colMap.debit || '—')} · <b>Kredit</b>: ${escapeHtml(colMap.credit || '—')}`
+          : ` · <b>Jumlah</b>: ${escapeHtml(colMap.amount)}`);
+      reconBtn.disabled = false;
+      reconResultsEl.style.display = 'none';
+      reconExportBtn.style.display = 'none';
+    } catch(err){
+      console.error(err);
+      reconErrorMsg.textContent = 'Gagal membaca berkas. Pastikan berkas berformat CSV atau Excel (.xlsx/.xls) yang valid.';
+      reconErrorMsg.classList.add('active');
+      reconBtn.disabled = true;
+    }
+  }
+
+  // ---------------- COLUMN DETECTION ----------------
+  function normalizeHeader(h){
+    return String(h || '').toLowerCase().replace(/[_\-.]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function findColumn(headers, candidates){
+    for (const h of headers){
+      if (candidates.includes(normalizeHeader(h))) return h;
+    }
+    for (const h of headers){
+      const nh = normalizeHeader(h);
+      if (candidates.some(c => nh.includes(c))) return h;
+    }
+    return null;
+  }
+  function detectColumns(headers){
+    return {
+      date: findColumn(headers, ['tanggal','tgl','date','tanggal transaksi','value date','valuedate']),
+      desc: findColumn(headers, ['keterangan','deskripsi','description','uraian','narasi','catatan','memo']),
+      ref: findColumn(headers, ['referensi','reference','no referensi','ref','no bukti','nomor bukti','no bukti kas','nomor']),
+      amount: findColumn(headers, ['jumlah','amount','nominal','nilai','value']),
+      debit: findColumn(headers, ['debit','debet','dr']),
+      credit: findColumn(headers, ['kredit','credit','cr'])
+    };
+  }
+
+  // ---------------- LEDGER PARSING HELPERS ----------------
+  function parseLedgerDate(value){
+    if (value instanceof Date && !isNaN(value)) return value;
+    if (typeof value === 'number'){
+      const ms = Math.round((value - 25569) * 86400 * 1000);
+      const d = new Date(ms);
+      return isNaN(d) ? null : d;
+    }
+    if (typeof value === 'string'){
+      const s = value.trim();
+      if (!s) return null;
+      let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+      if (m){
+        let [, d, mo, y] = m;
+        if (y.length === 2) y = (parseInt(y,10) < 50 ? '20' : '19') + y;
+        const dt = new Date(Number(y), Number(mo)-1, Number(d));
+        return isNaN(dt) ? null : dt;
+      }
+      m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+      if (m){
+        const [, y, mo, d] = m;
+        const dt = new Date(Number(y), Number(mo)-1, Number(d));
+        return isNaN(dt) ? null : dt;
+      }
+      const parsed = new Date(s);
+      if (!isNaN(parsed)) return parsed;
+    }
+    return null;
+  }
+
+  function parseLedgerAmount(v){
+    if (typeof v === 'number') return v;
+    if (v == null) return 0;
+    let s = String(v).trim();
+    if (!s) return 0;
+    const neg = /^\(.*\)$/.test(s) || /^-/.test(s);
+    s = s.replace(/[()]/g, '').replace(/^-/, '').replace(/[^\d.,]/g, '');
+    if (!s) return 0;
+    const lastComma = s.lastIndexOf(',');
+    const lastDot = s.lastIndexOf('.');
+    if (lastComma > lastDot){
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      s = s.replace(/,/g, '');
+    }
+    const n = parseFloat(s) || 0;
+    return neg ? -n : n;
+  }
+
+  function formatDateObj(d){
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    return `${dd}-${mm}-${d.getFullYear()}`;
+  }
+
+  function buildLedgerRecords(rows, colMap, invert){
+    const out = [];
+    rows.forEach((row, idx) => {
+      const date = colMap.date ? parseLedgerDate(row[colMap.date]) : null;
+      if (!date) return;
+      let signed;
+      if (colMap.debit || colMap.credit){
+        const debit = colMap.debit ? parseLedgerAmount(row[colMap.debit]) : 0;
+        const credit = colMap.credit ? parseLedgerAmount(row[colMap.credit]) : 0;
+        signed = credit - debit;
+      } else if (colMap.amount){
+        signed = parseLedgerAmount(row[colMap.amount]);
+      } else {
+        return;
+      }
+      if (invert) signed = -signed;
+      if (!signed) return;
+      out.push({
+        idx,
+        date,
+        dateLabel: formatDateObj(date),
+        desc: colMap.desc ? String(row[colMap.desc] || '').trim() : '',
+        ref: colMap.ref ? String(row[colMap.ref] || '').trim() : '',
+        amount: Math.abs(signed),
+        category: signed >= 0 ? 'C' : 'D'
+      });
+    });
+    return out;
+  }
+
+  function parseDMY(s){
+    if (!s || s === '—') return null;
+    const parts = s.split('-').map(Number);
+    if (parts.length !== 3) return null;
+    const [d, m, y] = parts;
+    if (!d || !m || !y) return null;
+    const dt = new Date(y, m-1, d);
+    return isNaN(dt) ? null : dt;
+  }
+
+  function buildBankList(transactions){
+    return transactions.map(tx => ({
+      valueDate: tx.valueDate,
+      dateObj: parseDMY(tx.valueDate),
+      category: tx.category,
+      amount: tx.amount,
+      description: tx.description,
+      reference: tx.reference
+    }));
+  }
+
+  // ---------------- MATCHING ----------------
+  function normalizeText(s){
+    return String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function textSimilarity(a, b){
+    const na = normalizeText(a), nb = normalizeText(b);
+    if (!na || !nb) return 0;
+    if (na === nb) return 1;
+    const ta = new Set(na.split(' ').filter(t => t.length > 1));
+    const tb = new Set(nb.split(' ').filter(t => t.length > 1));
+    let jac = 0;
+    if (ta.size && tb.size){
+      let inter = 0;
+      ta.forEach(t => { if (tb.has(t)) inter++; });
+      jac = inter / (ta.size + tb.size - inter);
+    }
+    const substrBonus = (na.includes(nb) || nb.includes(na)) ? 0.15 : 0;
+    return Math.min(1, jac + substrBonus);
+  }
+
+  function runReconciliation(bankList, ledgerList){
+    const candidates = [];
+    bankList.forEach((b, bi) => {
+      if (!b.dateObj) return;
+      ledgerList.forEach((l, li) => {
+        if (b.category !== l.category) return;
+        if (Math.abs(b.amount - l.amount) > AMOUNT_EPS) return;
+        const dayDiff = Math.abs((b.dateObj - l.date) / 86400000);
+        if (dayDiff > DATE_TOLERANCE_DAYS) return;
+        const descSim = Math.max(
+          textSimilarity(b.description, l.desc),
+          textSimilarity(b.reference, l.desc),
+          textSimilarity(b.reference, l.ref),
+          textSimilarity(b.description, l.ref)
+        );
+        const dateScore = Math.max(0, 1 - dayDiff / DATE_TOLERANCE_DAYS) * 50;
+        const descScore = descSim * 50;
+        candidates.push({ bi, li, score: dateScore + descScore, dayDiff, descSim });
+      });
+    });
+    candidates.sort((a, b) => b.score - a.score);
+    const usedBank = new Set(), usedLedger = new Set();
+    const matches = [];
+    candidates.forEach(c => {
+      if (usedBank.has(c.bi) || usedLedger.has(c.li)) return;
+      usedBank.add(c.bi); usedLedger.add(c.li);
+      matches.push(c);
+    });
+    const unmatchedBank = bankList.map((b, i) => ({ b, i })).filter(x => !usedBank.has(x.i)).map(x => x.b);
+    const unmatchedLedger = ledgerList.map((l, i) => ({ l, i })).filter(x => !usedLedger.has(x.i)).map(x => x.l);
+    return { matches, unmatchedBank, unmatchedLedger, bankList, ledgerList };
+  }
+
+  // ---------------- RENDER ----------------
+  function renderReconResults(){
+    const { matches, unmatchedBank, unmatchedLedger, bankList, ledgerList } = reconResult;
+    const currency = (parsed.header.opening && parsed.header.opening.currency) || (parsed.header.closing && parsed.header.closing.currency) || '';
+
+    const sumSigned = list => list.reduce((acc, t) => acc + (t.category === 'C' ? t.amount : -t.amount), 0);
+    const selisih = sumSigned(bankList) - sumSigned(ledgerList);
+
+    document.getElementById('reconSummary').innerHTML = `
+      <div class="stat"><div class="k">Transaksi Bank</div><div class="v">${bankList.length}</div></div>
+      <div class="stat"><div class="k">Transaksi Internal</div><div class="v">${ledgerList.length}</div></div>
+      <div class="stat"><div class="k">Cocok</div><div class="v credit">${matches.length}</div></div>
+      <div class="stat"><div class="k">Bank Tanpa Pasangan</div><div class="v ${unmatchedBank.length ? 'warn' : 'zero'}">${unmatchedBank.length}</div></div>
+      <div class="stat"><div class="k">Internal Tanpa Pasangan</div><div class="v ${unmatchedLedger.length ? 'warn' : 'zero'}">${unmatchedLedger.length}</div></div>
+      <div class="stat"><div class="k">Selisih Saldo</div><div class="v ${Math.abs(selisih) < 1 ? 'credit' : 'debit'}">${formatMoney(selisih, currency)}</div></div>
+    `;
+
+    document.getElementById('cntMatched').textContent = matches.length;
+    document.getElementById('cntUnbank').textContent = unmatchedBank.length;
+    document.getElementById('cntUnledger').textContent = unmatchedLedger.length;
+
+    const matchedBody = document.getElementById('matchedBody');
+    matchedBody.innerHTML = matches.length ? matches.map(m => {
+      const b = bankList[m.bi], l = ledgerList[m.li];
+      const pct = Math.round(m.score);
+      const badge = pct >= 80 ? 'high' : pct >= 50 ? 'mid' : 'low';
+      return `
+        <tr>
+          <td class="pair-row"><div class="pair-grid">
+            <div class="pair-col bank-col">
+              <div class="pair-col-label">Bank</div>
+              <div>${escapeHtml(b.valueDate)} · <span class="${b.category==='C'?'credit':'debit'}">${b.category==='C'?'+':'−'} ${formatMoney(b.amount, currency)}</span></div>
+              <div style="color:var(--paper-dimmer);font-size:11.5px;margin-top:3px;">${escapeHtml(b.reference || '—')}${b.description ? ' — ' + escapeHtml(b.description) : ''}</div>
+            </div>
+            <div class="pair-col">
+              <div class="pair-col-label">Internal</div>
+              <div>${escapeHtml(l.dateLabel)} · <span class="${l.category==='C'?'credit':'debit'}">${l.category==='C'?'+':'−'} ${formatMoney(l.amount, currency)}</span></div>
+              <div style="color:var(--paper-dimmer);font-size:11.5px;margin-top:3px;">${escapeHtml(l.ref || '—')}${l.desc ? ' — ' + escapeHtml(l.desc) : ''}</div>
+            </div>
+          </div></td>
+          <td style="text-align:center;"><span class="match-badge ${badge}">${pct}%</span></td>
+        </tr>`;
+    }).join('') : `<tr><td colspan="2" class="recon-empty">Belum ada transaksi yang cocok.</td></tr>`;
+
+    const unbankBody = document.getElementById('unbankBody');
+    unbankBody.innerHTML = unmatchedBank.length ? unmatchedBank.map(b => `
+      <tr>
+        <td>${escapeHtml(b.valueDate)}</td>
+        <td class="mark"><span class="mark-badge ${b.category==='C'?'credit':'debit'}">${b.category==='C'?'K':'D'}</span></td>
+        <td class="amount ${b.category==='C'?'credit':'debit'}">${b.category==='C'?'+':'−'} ${formatMoney(b.amount, currency)}</td>
+        <td class="ref">${escapeHtml(b.reference || '—')}</td>
+        <td class="desc">${escapeHtml(b.description || '—')}</td>
+      </tr>`).join('') : `<tr><td colspan="5" class="recon-empty">Semua transaksi bank memiliki pasangan.</td></tr>`;
+
+    const unledgerBody = document.getElementById('unledgerBody');
+    unledgerBody.innerHTML = unmatchedLedger.length ? unmatchedLedger.map(l => `
+      <tr>
+        <td>${escapeHtml(l.dateLabel)}</td>
+        <td class="mark"><span class="mark-badge ${l.category==='C'?'credit':'debit'}">${l.category==='C'?'K':'D'}</span></td>
+        <td class="amount ${l.category==='C'?'credit':'debit'}">${l.category==='C'?'+':'−'} ${formatMoney(l.amount, currency)}</td>
+        <td class="desc">${escapeHtml(l.desc || l.ref || '—')}</td>
+      </tr>`).join('') : `<tr><td colspan="4" class="recon-empty">Semua catatan internal memiliki pasangan.</td></tr>`;
+
+    document.querySelectorAll('.recon-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.recon-panel').forEach(p => p.classList.remove('active'));
+    document.querySelector('.recon-tab[data-tab="matched"]').classList.add('active');
+    document.getElementById('panel-matched').classList.add('active');
+  }
+
+  // ---------------- EXPORT RECONCILIATION ----------------
+  async function exportReconciliation(){
+    if (!reconResult){ return; }
+    if (typeof ExcelJS === 'undefined'){
+      showToast('Gagal memuat pustaka Excel. Periksa koneksi internet lalu coba lagi.');
+      return;
+    }
+    try{
+      showToast('Menyusun berkas rekonsiliasi…');
+      const { matches, unmatchedBank, unmatchedLedger, bankList, ledgerList } = reconResult;
+      const currency = (parsed.header.opening && parsed.header.opening.currency) || (parsed.header.closing && parsed.header.closing.currency) || 'IDR';
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'MT940 Telex Extractor';
+      wb.created = new Date();
+
+      const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14171C' } };
+      const headerFont = { name: 'IBM Plex Mono', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+      const bodyFont = { name: 'IBM Plex Mono', size: 10, color: { argb: 'FF20252D' } };
+      const moneyFmt = `"${currency}" #,##0.00`;
+
+      function styleHeaderRow(ws, row){
+        row.eachCell(c => { c.fill = headerFill; c.font = headerFont; c.alignment = { vertical:'middle' }; });
+        row.height = 20;
+      }
+
+      // Sheet 1: Ringkasan
+      const wsSum = wb.addWorksheet('Ringkasan');
+      wsSum.columns = [{ width: 30 }, { width: 22 }];
+      const sumSigned = list => list.reduce((acc, t) => acc + (t.category === 'C' ? t.amount : -t.amount), 0);
+      const selisih = sumSigned(bankList) - sumSigned(ledgerList);
+      const summaryRows = [
+        ['Total Transaksi Bank', bankList.length],
+        ['Total Transaksi Internal', ledgerList.length],
+        ['Jumlah Cocok', matches.length],
+        ['Bank Tanpa Pasangan', unmatchedBank.length],
+        ['Internal Tanpa Pasangan', unmatchedLedger.length],
+        ['Selisih Saldo', selisih]
+      ];
+      wsSum.addRow(['RINGKASAN REKONSILIASI', '']);
+      styleHeaderRow(wsSum, wsSum.lastRow);
+      wsSum.mergeCells(1,1,1,2);
+      summaryRows.forEach(([k,v]) => {
+        const row = wsSum.addRow([k, v]);
+        row.getCell(1).font = bodyFont;
+        row.getCell(2).font = bodyFont;
+        if (k === 'Selisih Saldo') row.getCell(2).numFmt = moneyFmt;
+      });
+
+      // Sheet 2: Cocok
+      const wsMatch = wb.addWorksheet('Cocok');
+      wsMatch.columns = [
+        { width: 12 }, { width: 8 }, { width: 16 }, { width: 30 }, { width: 30 },
+        { width: 12 }, { width: 8 }, { width: 16 }, { width: 30 }, { width: 30 }, { width: 10 }
+      ];
+      const matchHeader = ['Tgl Bank','D/K','Jumlah Bank','Ref Bank','Ket. Bank','Tgl Internal','D/K','Jumlah Internal','Ref Internal','Ket. Internal','Keyakinan'];
+      wsMatch.addRow(matchHeader);
+      styleHeaderRow(wsMatch, wsMatch.lastRow);
+      matches.forEach(m => {
+        const b = bankList[m.bi], l = ledgerList[m.li];
+        const row = wsMatch.addRow([
+          b.valueDate, b.category, b.amount, b.reference || '—', b.description || '—',
+          l.dateLabel, l.category, l.amount, l.ref || '—', l.desc || '—', Math.round(m.score) + '%'
+        ]);
+        row.eachCell(c => c.font = bodyFont);
+        row.getCell(3).numFmt = moneyFmt;
+        row.getCell(8).numFmt = moneyFmt;
+      });
+
+      // Sheet 3: Bank Tanpa Pasangan
+      const wsUnbank = wb.addWorksheet('Bank Tanpa Pasangan');
+      wsUnbank.columns = [{ width: 12 }, { width: 8 }, { width: 16 }, { width: 30 }, { width: 30 }];
+      wsUnbank.addRow(['Tanggal','D/K','Jumlah','Referensi','Keterangan']);
+      styleHeaderRow(wsUnbank, wsUnbank.lastRow);
+      unmatchedBank.forEach(b => {
+        const row = wsUnbank.addRow([b.valueDate, b.category, b.amount, b.reference || '—', b.description || '—']);
+        row.eachCell(c => c.font = bodyFont);
+        row.getCell(3).numFmt = moneyFmt;
+      });
+
+      // Sheet 4: Internal Tanpa Pasangan
+      const wsUnledger = wb.addWorksheet('Internal Tanpa Pasangan');
+      wsUnledger.columns = [{ width: 12 }, { width: 8 }, { width: 16 }, { width: 30 }, { width: 30 }];
+      wsUnledger.addRow(['Tanggal','D/K','Jumlah','Referensi','Keterangan']);
+      styleHeaderRow(wsUnledger, wsUnledger.lastRow);
+      unmatchedLedger.forEach(l => {
+        const row = wsUnledger.addRow([l.dateLabel, l.category, l.amount, l.ref || '—', l.desc || '—']);
+        row.eachCell(c => c.font = bodyFont);
+        row.getCell(3).numFmt = moneyFmt;
+      });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const stamp = new Date().toISOString().slice(0,10);
+      const acc = (parsed.header.account || 'MT940').replace(/[^\w-]+/g,'_').trim();
+      a.download = `Rekonsiliasi_${acc}_${stamp}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Berkas rekonsiliasi berhasil diunduh.');
+    } catch(err){
+      console.error(err);
+      showToast('Gagal membuat berkas rekonsiliasi — lihat console (F12) untuk detail.');
+    }
   }
 
 })();
