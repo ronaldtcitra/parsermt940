@@ -286,6 +286,26 @@
   .field-check input{accent-color:var(--amber);width:14px;height:14px;cursor:pointer;}
   .col-map{margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--paper-dimmer);border-left:2px solid var(--border-strong);padding-left:10px;line-height:1.9;}
   .col-map b{color:var(--paper-dim);}
+
+  /* ---------- FILTER BAR ---------- */
+  .filter-bar{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px;}
+  .search-input{
+    flex:1;min-width:200px;font-family:var(--mono);font-size:12.5px;
+    background:var(--panel);border:1px solid var(--border-strong);
+    color:var(--paper);padding:11px 14px;
+  }
+  .search-input::placeholder{color:var(--paper-dimmer);}
+  .search-input:focus{outline:none;border-color:var(--amber);}
+  .filter-select{
+    font-family:var(--mono);font-size:12px;letter-spacing:0.5px;
+    background:var(--panel);border:1px solid var(--border-strong);
+    color:var(--paper-dim);padding:11px 12px;cursor:pointer;
+  }
+  .filter-select:focus{outline:none;border-color:var(--amber);}
+  .filter-count{
+    font-family:var(--mono);font-size:11px;color:var(--paper-dimmer);
+    margin:-10px 0 16px;letter-spacing:0.5px;
+  }
 </style>
 </head>
 <body>
@@ -351,6 +371,16 @@
       </div>
 
       <div class="statement-panel" id="statementPanel"></div>
+
+      <div class="filter-bar">
+        <input type="text" id="searchInput" class="search-input" placeholder="Cari valuta, referensi, atau keterangan…">
+        <select id="dkFilter" class="filter-select">
+          <option value="all">Semua D/K</option>
+          <option value="C">Kredit</option>
+          <option value="D">Debit</option>
+        </select>
+      </div>
+      <div class="filter-count" id="filterCount"></div>
 
       <div class="table-wrap">
         
@@ -420,6 +450,21 @@
 
         <div id="reconResults" style="display:none;">
           <div class="recon-summary" id="reconSummary"></div>
+
+          <div class="filter-bar">
+            <input type="text" id="reconSearchInput" class="search-input" placeholder="Cari tanggal, referensi, atau keterangan…">
+            <select id="reconDkFilter" class="filter-select">
+              <option value="all">Semua D/K</option>
+              <option value="C">Kredit</option>
+              <option value="D">Debit</option>
+            </select>
+            <select id="reconConfFilter" class="filter-select">
+              <option value="all">Semua Keyakinan</option>
+              <option value="high">Tinggi (≥80%)</option>
+              <option value="mid">Sedang (50–79%)</option>
+              <option value="low">Rendah (&lt;50%)</option>
+            </select>
+          </div>
 
           <div class="recon-tabs" id="reconTabs">
             <button class="recon-tab active" data-tab="matched">Cocok <span class="count" id="cntMatched">0</span></button>
@@ -746,6 +791,21 @@ content = content
     }
     next();
   }
+function getFilteredTransactions(){
+    if (!parsed) return [];
+    return parsed.transactions.filter(tx => {
+        if (filterDK !== 'all' && tx.category !== filterDK) return false;
+        if (filterText){
+            const hay = (
+                (tx.valueDate||'') + ' ' + (tx.typeCode||'') + ' ' +
+                (tx.reference||'') + ' ' + (tx.description||'')
+            ).toLowerCase();
+            if (!hay.includes(filterText)) return false;
+        }
+        return true;
+    });
+}
+
 function updateLoadMoreButton() {
 
     const btn = document.getElementById("loadMoreBtn");
@@ -755,7 +815,7 @@ function updateLoadMoreButton() {
         return;
     }
 
-    const total = parsed.transactions.length;
+    const total = getFilteredTransactions().length;
 
     if (total <= ROWS_PER_LOAD) {
         btn.style.display = "none";
@@ -778,7 +838,7 @@ function updateLoadMoreButton() {
 }
 document.getElementById("loadMoreBtn").addEventListener("click", () => {
 
-    const total = parsed.transactions.length;
+    const total = getFilteredTransactions().length;
 
     if (visibleRows < total) {
 
@@ -796,6 +856,23 @@ document.getElementById("loadMoreBtn").addEventListener("click", () => {
     renderResults();
 
 });
+
+  // ---------------- FILTER & SEARCH (PARSER) ----------------
+  let filterText = '';
+  let filterDK = 'all';
+  const searchInputEl = document.getElementById('searchInput');
+  const dkFilterEl = document.getElementById('dkFilter');
+  searchInputEl.addEventListener('input', e => {
+    filterText = e.target.value.trim().toLowerCase();
+    visibleRows = ROWS_PER_LOAD;
+    renderResults();
+  });
+  dkFilterEl.addEventListener('change', e => {
+    filterDK = e.target.value;
+    visibleRows = ROWS_PER_LOAD;
+    renderResults();
+  });
+
   // ---------------- RENDER RESULTS ----------------
   function renderResults(){
     const { header, transactions } = parsed;
@@ -822,10 +899,18 @@ const closing =
     `;
 
     const tbody = document.getElementById('txBody');
+    const filtered = getFilteredTransactions();
+    const filterCountEl = document.getElementById('filterCount');
+    const isFiltering = !!filterText || filterDK !== 'all';
+
     if (transactions.length === 0){
       tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--paper-dimmer);padding:30px;">Tidak ada baris transaksi (:61:) yang ditemukan pada berkas ini.</td></tr>`;
+      filterCountEl.textContent = '';
+    } else if (filtered.length === 0){
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--paper-dimmer);padding:30px;">Tidak ada transaksi yang cocok dengan pencarian/filter.</td></tr>`;
+      filterCountEl.textContent = `0 dari ${transactions.length} transaksi ditampilkan`;
     } else {
-      const rows = transactions.slice(0, visibleRows);
+      const rows = filtered.slice(0, visibleRows);
 
 tbody.innerHTML = rows.map(tx => `
         <tr>
@@ -837,6 +922,7 @@ tbody.innerHTML = rows.map(tx => `
           <td class="desc">${escapeHtml(tx.description || '—')}</td>
         </tr>
       `).join('');
+      filterCountEl.textContent = isFiltering ? `Menampilkan ${Math.min(visibleRows, filtered.length)} dari ${filtered.length} hasil (total ${transactions.length} transaksi)` : '';
     }
 
     document.getElementById('rawPanel').textContent = rawText;
@@ -879,6 +965,9 @@ tbody.innerHTML = rows.map(tx => `
     fileInput.value = "";
     document.getElementById('rawPanel').classList.remove('active');
     document.getElementById('rawToggle').textContent = '▸ Tampilkan pesan mentah';
+    filterText = ''; filterDK = 'all';
+    searchInputEl.value = ''; dkFilterEl.value = 'all';
+    document.getElementById('filterCount').textContent = '';
     resetRecon();
     showScreen('upload');
   });
@@ -1151,6 +1240,7 @@ tbody.innerHTML = rows.map(tx => `
       reconErrorMsg.classList.remove('active');
       const bankList = buildBankList(parsed.transactions);
       reconResult = runReconciliation(bankList, ledgerList);
+      resetReconFilters();
       renderReconResults();
       reconResultsEl.style.display = 'block';
       reconExportBtn.style.display = 'inline-block';
@@ -1170,6 +1260,30 @@ tbody.innerHTML = rows.map(tx => `
     });
   });
 
+  // ---------------- FILTER & SEARCH (RECONCILIATION) ----------------
+  let reconFilterText = '';
+  let reconFilterDK = 'all';
+  let reconFilterConf = 'all';
+  const reconSearchInputEl = document.getElementById('reconSearchInput');
+  const reconDkFilterEl = document.getElementById('reconDkFilter');
+  const reconConfFilterEl = document.getElementById('reconConfFilter');
+  reconSearchInputEl.addEventListener('input', e => {
+    reconFilterText = e.target.value.trim().toLowerCase();
+    if (reconResult) renderReconResults();
+  });
+  reconDkFilterEl.addEventListener('change', e => {
+    reconFilterDK = e.target.value;
+    if (reconResult) renderReconResults();
+  });
+  reconConfFilterEl.addEventListener('change', e => {
+    reconFilterConf = e.target.value;
+    if (reconResult) renderReconResults();
+  });
+  function resetReconFilters(){
+    reconFilterText = ''; reconFilterDK = 'all'; reconFilterConf = 'all';
+    reconSearchInputEl.value = ''; reconDkFilterEl.value = 'all'; reconConfFilterEl.value = 'all';
+  }
+
   function resetRecon(){
     reconRows = null; reconColMap = null; reconResult = null;
     reconFilecard.classList.remove('active');
@@ -1181,6 +1295,7 @@ tbody.innerHTML = rows.map(tx => `
     reconInvertSign.checked = false;
     reconResultsEl.style.display = 'none';
     reconExportBtn.style.display = 'none';
+    resetReconFilters();
   }
 
   async function handleReconFile(file){
@@ -1433,8 +1548,37 @@ tbody.innerHTML = rows.map(tx => `
     document.getElementById('cntUnbank').textContent = unmatchedBank.length;
     document.getElementById('cntUnledger').textContent = unmatchedLedger.length;
 
+    // ---- apply filters ----
+    const q = reconFilterText;
+    function passDK(cat){ return reconFilterDK === 'all' || cat === reconFilterDK; }
+    function passText(...parts){
+      if (!q) return true;
+      return parts.filter(Boolean).join(' ').toLowerCase().includes(q);
+    }
+    function passConf(pct){
+      if (reconFilterConf === 'all') return true;
+      if (reconFilterConf === 'high') return pct >= 80;
+      if (reconFilterConf === 'mid') return pct >= 50 && pct < 80;
+      if (reconFilterConf === 'low') return pct < 50;
+      return true;
+    }
+
+    const filteredMatches = matches.filter(m => {
+      const b = bankList[m.bi], l = ledgerList[m.li];
+      const pct = Math.round(m.score);
+      return passDK(b.category) && passConf(pct) &&
+        passText(b.valueDate, b.reference, b.description, l.dateLabel, l.ref, l.desc);
+    });
+    const filteredUnbank = unmatchedBank.filter(b =>
+      passDK(b.category) && passText(b.valueDate, b.reference, b.description)
+    );
+    const filteredUnledger = unmatchedLedger.filter(l =>
+      passDK(l.category) && passText(l.dateLabel, l.ref, l.desc)
+    );
+    const isFiltering = !!q || reconFilterDK !== 'all' || reconFilterConf !== 'all';
+
     const matchedBody = document.getElementById('matchedBody');
-    matchedBody.innerHTML = matches.length ? matches.map(m => {
+    matchedBody.innerHTML = filteredMatches.length ? filteredMatches.map(m => {
       const b = bankList[m.bi], l = ledgerList[m.li];
       const pct = Math.round(m.score);
       const badge = pct >= 80 ? 'high' : pct >= 50 ? 'mid' : 'low';
@@ -1454,31 +1598,38 @@ tbody.innerHTML = rows.map(tx => `
           </div></td>
           <td style="text-align:center;"><span class="match-badge ${badge}">${pct}%</span></td>
         </tr>`;
-    }).join('') : `<tr><td colspan="2" class="recon-empty">Belum ada transaksi yang cocok.</td></tr>`;
+    }).join('') : (matches.length && isFiltering
+        ? `<tr><td colspan="2" class="recon-empty">Tidak ada hasil yang cocok dengan pencarian/filter.</td></tr>`
+        : `<tr><td colspan="2" class="recon-empty">Belum ada transaksi yang cocok.</td></tr>`);
 
     const unbankBody = document.getElementById('unbankBody');
-    unbankBody.innerHTML = unmatchedBank.length ? unmatchedBank.map(b => `
+    unbankBody.innerHTML = filteredUnbank.length ? filteredUnbank.map(b => `
       <tr>
         <td>${escapeHtml(b.valueDate)}</td>
         <td class="mark"><span class="mark-badge ${b.category==='C'?'credit':'debit'}">${b.category==='C'?'K':'D'}</span></td>
         <td class="amount ${b.category==='C'?'credit':'debit'}">${b.category==='C'?'+':'−'} ${formatMoney(b.amount, currency)}</td>
         <td class="ref">${escapeHtml(b.reference || '—')}</td>
         <td class="desc">${escapeHtml(b.description || '—')}</td>
-      </tr>`).join('') : `<tr><td colspan="5" class="recon-empty">Semua transaksi bank memiliki pasangan.</td></tr>`;
+      </tr>`).join('') : (unmatchedBank.length && isFiltering
+        ? `<tr><td colspan="5" class="recon-empty">Tidak ada hasil yang cocok dengan pencarian/filter.</td></tr>`
+        : `<tr><td colspan="5" class="recon-empty">Semua transaksi bank memiliki pasangan.</td></tr>`);
 
     const unledgerBody = document.getElementById('unledgerBody');
-    unledgerBody.innerHTML = unmatchedLedger.length ? unmatchedLedger.map(l => `
+    unledgerBody.innerHTML = filteredUnledger.length ? filteredUnledger.map(l => `
       <tr>
         <td>${escapeHtml(l.dateLabel)}</td>
         <td class="mark"><span class="mark-badge ${l.category==='C'?'credit':'debit'}">${l.category==='C'?'K':'D'}</span></td>
         <td class="amount ${l.category==='C'?'credit':'debit'}">${l.category==='C'?'+':'−'} ${formatMoney(l.amount, currency)}</td>
         <td class="desc">${escapeHtml(l.desc || l.ref || '—')}</td>
-      </tr>`).join('') : `<tr><td colspan="4" class="recon-empty">Semua catatan internal memiliki pasangan.</td></tr>`;
+      </tr>`).join('') : (unmatchedLedger.length && isFiltering
+        ? `<tr><td colspan="4" class="recon-empty">Tidak ada hasil yang cocok dengan pencarian/filter.</td></tr>`
+        : `<tr><td colspan="4" class="recon-empty">Semua catatan internal memiliki pasangan.</td></tr>`);
 
-    document.querySelectorAll('.recon-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.recon-panel').forEach(p => p.classList.remove('active'));
-    document.querySelector('.recon-tab[data-tab="matched"]').classList.add('active');
-    document.getElementById('panel-matched').classList.add('active');
+    // pertahankan tab aktif saat ini; hanya reset ke tab "Cocok" jika belum ada tab aktif
+    if (!document.querySelector('.recon-tab.active')){
+      document.querySelector('.recon-tab[data-tab="matched"]').classList.add('active');
+      document.getElementById('panel-matched').classList.add('active');
+    }
   }
 
   // ---------------- EXPORT RECONCILIATION ----------------
